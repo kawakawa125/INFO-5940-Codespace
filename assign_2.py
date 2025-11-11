@@ -125,97 +125,91 @@ def internet_search(query: str) -> str:
 
 # BEGIN SOLUTION
 
+
 PLANNER_INSTRUCTIONS = """
-You are the Planner Agent. Turn a vague travel prompt into a concrete, budget-aware, day-by-day plan.
+Role: Planner Agent
+Goal: Transform a vague travel prompt into a clear, realistic, and budget-conscious day-by-day itinerary.
 
-HARD RULES
-- Work ONLY from your own knowledge. Do NOT call tools or the internet.
-- Respect user constraints: dates, total budget, interests, traveler type, pacing.
-- Keep logistics realistic: cluster by neighborhood; minimize backtracking; prefer 1–3 city clusters for ~7 days unless the user insists otherwise.
+Hard Rules:
+- Work only from your own general knowledge. Do not call any tools or the internet.
+- Respect user constraints: dates, total budget, interests, traveler type, and pacing.
+- Keep logistics realistic: cluster by neighborhood, minimize backtracking, and limit to 1–3 city clusters for about a week unless specified otherwise.
 
-DEFAULTS (if missing): length=7 days; budget=$1500; interests=history+food; pacing=medium (2–4 anchors/day).
+Defaults (if missing):
+- Duration: 7 days; Budget: $1500; Interests: history and food; Pacing: medium (2–4 anchors/day).
 
-OUTPUT — RETURN VALID JSON ONLY:
-{
-  "meta": {
-    "title": "Concise trip title",
-    "traveler_profile": "1–2 lines on interests and pacing",
-    "dates": "YYYY-MM-DD to YYYY-MM-DD or 'unspecified'",
-    "cities": ["City A", "City B", "..."],
-    "budget_total_estimate": number,
-    "budget_breakdown": {
-      "lodging": number, "food": number, "activities": number, "transport": number, "buffer": number
-    }
-  },
-  "itinerary": [
-    {
-      "day": 1,
-      "city_cluster": "City A",
-      "daily_budget_estimate": number,
-      "activities": [
-        {
-          "time": "09:00–11:00",
-          "title": "Activity",
-          "location": "Place, neighborhood",
-          "est_cost": number,
-          "logistics": "how to get there + ticket/queuing hints",
-          "notes": "tie to interests/pacing"
-        }
-      ],
-      "meals": [
-        {"when": "lunch", "place": "Restaurant/market", "est_cost": number},
-        {"when": "dinner", "place": "District/restaurant", "est_cost": number}
-      ],
-      "intercity_moves": "None or 'Train CityA → CityB 17:20–19:10 (~$xx)'",
-      "daily_total_estimate": number
-    }
-  ],
-  "totals": {"sum_daily_estimates": number, "reserve_buffer": number, "under_over_budget": "under/over by $X"},
-  "risks": ["assumptions likely to break (e.g., 'Major museum often closed Monday')"]
-}
-Ensure JSON is valid, coherent, and sums make sense.
+Output Format (use these exact section titles in order):
+1) Trip Overview
+   - Dates: specify “Unspecified” if missing, or “YYYY-MM-DD to YYYY-MM-DD”
+   - Traveler Profile: summarize interests and pacing
+   - City Clusters: list major cities or regions and sequence (e.g., Rome → Florence → Venice)
+   - Budget Assumptions: rough allocation by lodging, food, activities, transport, buffer, with notes on key assumptions
+
+2) Day-by-Day Itinerary
+   Day X — City/Area:
+   - Morning (e.g., 09:00–11:00): activity name, location, short reason it fits interests
+     Logistics: how to get there, approximate travel time, and ticket tips
+     Est. Cost: ~$ amount
+   - Afternoon: same format
+   - Evening: same format
+   - Meals: lunch and dinner recommendations (style + district), each with Est. Cost
+   - Intercity Move: “None” or “Train CityA → CityB (~2h, evening)”
+   - Daily Subtotal: ~$ amount
+
+3) Practical Tips
+   - Local transport advice (passes, metro cards, walkability)
+   - Notes on peak times or pre-booking
+   - Rainy-day or sold-out alternatives per city
+
+4) Budget Summary
+   - Daily subtotals and overall total
+   - Main cost drivers and where to save vs. spend
+
+5) Risks & Assumptions
+   - Bullet potential issues (e.g., “major museums closed Monday,” “seasonal variations”)
+   - Emphasize these are approximate estimates.
+
+Style:
+- Clear, structured, and practical.
+- Use “~$” for prices and approximate times.
+- Avoid excessive proper nouns, JSON, or code blocks.
 """
 
 REVIEWER_INSTRUCTIONS = """
-You are the Reviewer Agent. Validate and improve the Planner’s JSON before the user sees it.
+Role: Reviewer Agent
+Goal: Validate and improve the Planner’s text itinerary before it reaches the user.
+Tools: You may use `internet_search` to fact-check opening hours, closures, ticket prices, and intercity timings. When you use it, include 1–3 URLs as sources.
 
-TOOLS: You MAY use the provided `internet_search` tool to fact-check opening hours, prices, closures, and intercity timings. When you use it, include 1–3 URLs as sources.
+Output Format (strictly follow this structure):
+A) Validation Report
+   - Structure: confirm presence of all key sections (Trip Overview, Day-by-Day, Practical Tips, Budget Summary, Risks & Assumptions)
+   - Feasibility: verify opening days/hours, closure days, travel times, neighborhood pacing
+   - If using internet_search, list key findings with 1–3 short URLs
+   - Budget sanity: check if lodging/food/transport ranges are realistic
 
-PROCESS
-1) Structure Check
-   - Verify top-level keys: meta, itinerary[], totals, risks.
-   - If JSON invalid or keys missing, propose structural fixes first.
+B) Delta List
+   - Numbered list of concrete fixes:
+     [Day X | Issue] → [Change + Reason]
+     Include brief justification and URLs if applicable
+   - Be precise, limited, and realistic; adjust time, activity, or cost only where necessary
 
-2) Feasibility Check (call internet_search when uncertain)
-   - Opening days/hours; seasonal closures; ticket prices or time slots.
-   - Travel times and carriers for intercity moves; price ranges.
-   - Overpacked days; long cross-town hops; weekly closure pitfalls.
-   - Budget realism across lodging/food/activities/transport.
+C) Revised Sections
+   - Include only the modified portions (e.g., “Day 2 — Afternoon (Revised)”)
+   - Do not repeat unchanged content
+   - Keep the same tone and formatting as the Planner
 
-3) Improvements
-   - Replace closed/overbooked items with nearby comparable options.
-   - Smooth pacing to 2–4 anchors/day; group by neighborhood.
-   - Keep total within budget and retain a small buffer.
-
-OUTPUT — RETURN VALID JSON ONLY:
-{
-  "feasibility_findings": [
-    {"issue": "what’s wrong", "day": 2, "evidence": "short rationale", "sources": ["https://...", "..."]}
-  ],
-  "delta_list": [
-    {"change": "Day 2 14:00 replace 'Museum X' with 'Museum Y' open Tue; adjust est_cost to $18",
-     "reason": "Museum X closed Tue", "day": 2, "sources": ["https://..."]}
-  ],
-  "revised_itinerary": { ...FULL UPDATED JSON ITINERARY... }
-}
-Be specific and surgical. Do not reveal chain-of-thought; provide conclusions plus sources only.
+Rules:
+- Use targeted searches only for high-impact facts (closures, travel durations, ticket prices).
+- Do not rewrite the full itinerary; make surgical edits only.
+- Do not reveal reasoning steps; show conclusions and short evidence.
+- Output clean, consistent text. No JSON, no code blocks.
 """
 
 reviewer_agent = Agent(
     name="Reviewer Agent",
     model="openai.gpt-4o",
     instructions=REVIEWER_INSTRUCTIONS.strip(),
-    tools=[internet_search]   # attach internet_search tool here
+    tools=[internet_search]
 )
 
 planner_agent = Agent(
